@@ -1,0 +1,145 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: #c9d6df;
+  color: #1c1916;
+  font-family: "Be Vietnam Pro", "Helvetica Neue", Arial, sans-serif;
+}
+
+body {
+  position: fixed;
+  inset: 0;
+}
+
+canvas {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  outline: none;
+}
+
+.stack,
+.help-panel,
+.legend {
+  position: fixed;
+  z-index: 2;
+  pointer-events: none;
+  user-select: none;
+}
+
+.stack {
+  top: 18px;
+  left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: min(360px, calc(100vw - 36px));
+}
+
+.help-panel {
+  left: 18px;
+  bottom: 18px;
+}
+
+.legend {
+  right: 18px;
+  bottom: 18px;
+}
+
+.panel {
+  background: rgba(255, 252, 248, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: 16px;
+  padding: 14px 16px 15px;
+  box-shadow: 0 10px 30px rgba(40, 32, 24, 0.08);
+  backdrop-filter: blur(12px);
+}
+
+.eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #8a7358;
+}
+
+h1 {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 42px;
+  font-weight: 500;
+  line-height: 0.95;
+  letter-spacing: 0.04em;
+  margin: 2px 0 6px;
+}
+
+.spec,
+.help-panel p,
+.zone-en {
+  font-size: 13px;
+  line-height: 1.45;
+  color: #5c564f;
+}
+
+.zone-vi {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin-top: 2px;
+}
+
+.zone-en {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 16px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.help-panel p + p {
+  margin-top: 2px;
+}
+
+.legend ul {
+  list-style: none;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 16px;
+  margin-top: 8px;
+}
+
+.legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: block;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+
+.swatch.apparel { background: #d9c7b0; }
+.swatch.jewelry { background: #2a2724; }
+.swatch.watches { background: #243038; }
+.swatch.footwear { background: #cbbba8; }
+.swatch.handbags { background: #6d3438; }
+.swatch.accessories { background: #3f4d45; }
+
+@media (max-width: 720px) {
+  h1 { font-size: 34px; }
+  .legend { display: none; }
+  .help-panel { max-width: calc(100vw - 36px); }
+}
