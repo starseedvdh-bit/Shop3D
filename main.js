@@ -78,6 +78,14 @@ let locationKey = '';
 
 const materials = {};
 
+let raycaster;
+let mouse = new THREE.Vector2();
+let hoverProduct = null;
+let productCardVisible = false;
+const products = [];
+let fpsTime = 0; // FPS counter variable
+let fps = 0;
+
 init();
 
 async function init() {
@@ -91,7 +99,7 @@ async function init() {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
   document.body.prepend(renderer.domElement);
   maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
 
@@ -100,7 +108,7 @@ async function init() {
   scene.environmentIntensity = 0.45;
 
   camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.08, 160);
-  camera.position.set(0, 3.15, 11.85);
+  camera.position.set(0, 3.0, 17);
 
   const pmrem = new THREE.PMREMGenerator(renderer);
   const env = new RoomEnvironment();
@@ -133,7 +141,7 @@ async function init() {
   addPlant(3.4, 11.15);
 
   controls = new OrbitControls(camera, renderer.domElement);
-  controls.target.copy(player);
+  controls.target.set(0, 2.5, -10.5);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
   controls.enablePan = false;
@@ -1249,5 +1257,22 @@ function animate() {
   controls.update();
   if (camera.position.y < 0.4) camera.position.y = 0.4;
   updateHud();
+  // FPS counter
+  fpsTime++;
+  if (fpsTime > 30) {
+    fps = 30 / (fpsTime / 30);
+    fpsTime = 0;
+  }
+  // Display FPS in top-left corner
+  const fpsText = document.createElement('div');
+  fpsText.style.cssText = 'position: fixed; top: 10px; left: 10px; width: 50px; height: 20px; background: rgba(0, 0, 0, 0.5); color: #fff; font-family: "Be Vietnam Pro", sans-serif; font-size: 14px; text-align: center;';
+  fpsText.innerHTML = 'FPS: ' + Math.floor(fps);
+  // Remove previous FPS text if exists
+  const existing = document.querySelector('.fps-counter');
+  if (existing) existing.remove();
+  document.body.appendChild(fpsText);
+  // Enable shadow fade effect
+  renderer.setClearColor(0x000000);
+  renderer.fog = new THREE.FogExp2(0x000000, 0.015);
   renderer.render(scene, camera);
 }
