@@ -417,16 +417,6 @@ function buildShell() {
     scene.add(wall);
   }
 
-  const ceiling = new THREE.Mesh(new THREE.BoxGeometry(FLOOR_W + 0.8, 0.14, FLOOR_D + 0.8), materials.ceiling);
-  ceiling.position.y = CEILING + 0.07;
-  ceiling.receiveShadow = true;
-  scene.add(ceiling);
-
-  const fascia = new THREE.Mesh(new THREE.BoxGeometry(FLOOR_W, 0.64, 0.22), materials.wall);
-  fascia.position.set(0, CEILING - 0.32, FLOOR_D / 2 + 0.02);
-  fascia.castShadow = true;
-  scene.add(fascia);
-
   const sill = new THREE.Mesh(new THREE.BoxGeometry(FLOOR_W, 0.14, 0.16), materials.pot);
   sill.position.set(0, 0.07, FLOOR_D / 2);
   sill.receiveShadow = true;
@@ -650,7 +640,7 @@ function makeSignTexture(title, subtitle, note) {
 }
 
 function buildWordmarks() {
-  const facade = makeWordmarkTexture('ATELIER', 'SHOWROOM');
+  const facade = makeWordmarkTexture('SAITEX', 'SHOWROOM');
   const outside = new THREE.Mesh(
     new THREE.PlaneGeometry(7.2, 0.7),
     new THREE.MeshBasicMaterial({ map: facade, transparent: true, toneMapped: false }),
@@ -658,7 +648,7 @@ function buildWordmarks() {
   outside.position.set(0, 4.18, FLOOR_D / 2 + 0.14);
   scene.add(outside);
 
-  const insideMap = makeWordmarkTexture('ATELIER', 'SHOWROOM');
+  const insideMap = makeWordmarkTexture('SAITEX', 'SHOWROOM');
   const inside = new THREE.Mesh(
     new THREE.PlaneGeometry(6.4, 0.62),
     new THREE.MeshBasicMaterial({ map: insideMap, transparent: true, toneMapped: false }),
@@ -710,7 +700,7 @@ function makeMuralTexture() {
   drawTracked(ctx, 'BỘ SƯU TẬP', canvas.width / 2, 180, 14);
   ctx.fillStyle = '#231f1b';
   ctx.font = '600 168px "Cormorant Garamond", serif';
-  drawTracked(ctx, 'ATELIER', canvas.width / 2, 360, 26);
+  drawTracked(ctx, 'SAITEX', canvas.width / 2, 360, 26);
   ctx.fillStyle = '#5c564f';
   ctx.font = '500 48px "Be Vietnam Pro", sans-serif';
   ctx.fillText('Thời trang · 1.000 m²', canvas.width / 2, 520);
