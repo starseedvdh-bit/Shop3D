@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { createProductManager } from './productManagerUI.js';
+import { CATEGORIES } from './products.js';
 
 // 1 đơn vị = 1 mét. Sàn 40 × 25 m = 1.000 m². Trần 4,5 m.
 const FLOOR_W = 40;
@@ -85,14 +87,28 @@ let productCardVisible = false;
 let focusGroup = null;
 let restoringGroup = null;
 let nameSprite = null;
+let flight = null;
 const ZOOM_FACTOR = 1.28;
-const RENAME_KEY = 'saitex_product_renames';
+const PRODUCT_STATE_KEY = 'saitex_showroom_products';
+const LEGACY_CUSTOM_KEY = 'saitex_custom_products';
+const AUTH_KEY = 'saitex_auth';
+const ADMIN_USER = 'admin';
+const ADMIN_PASS = 'saitex2026';
+let isAdmin = false;
+let pendingAdminOpen = false;
 const productRegistry = [];
 const products = [];
 const staff = [];
 const STOCK = 4; // 4x product density per display area
 let fpsTime = 0; // FPS counter variable
 let fps = 0;
+
+let productManager = null;
+const occupiedSpots = []; // các spot đã đặt sản phẩm (x,z,r)
+const customNodes = []; // node 3D do admin thêm
+const hiddenNodes = new Set(); // node đang ẩn (Tạm hết hàng)
+const SPAWN_R = 0.55;
+let productUidCounter = 0;
 
 init();
 
@@ -145,6 +161,7 @@ async function init() {
   buildZones();
   buildWordmarks();
   initProductAdmin();
+  initProductManager();
   addHostDesk();
   addLounge();
   addStaffTeam();
@@ -181,13 +198,16 @@ async function init() {
     if (hits.length > 0) {
       let node = hits[0].object;
       while (node && !node.userData.product) node = node.parent;
-      if (node && node.userData.product) {
+      if (node && node.userData.product && node.visible !== false) {
         const p = node.userData.product;
         card.innerHTML =
           '<p class="eyebrow">' + p.category + '</p>' +
           '<p class="product-name">' + p.name + '</p>' +
+          (p.material ? '<p class="product-color">Chất liệu: ' + p.material + '</p>' : '') +
+          (p.desc ? '<p class="product-color">' + p.desc + '</p>' : '') +
           '<p class="product-color"><span class="chip" style="background:' + p.color + '"></span>' + p.color + '</p>' +
-          '<p class="product-price">' + p.price + '</p>';
+          '<p class="product-price">' + p.price + '</p>' +
+          statusBadgeHtml(p.status);
         card.classList.add('visible');
         productCardVisible = true;
         focusProduct(node);
@@ -2476,6 +2496,7 @@ function renderAdminList() {
       input.value = entry.nodes[0].userData.product.name;
       input.dataset.key = entry.key;
       input.addEventListener('change', () => {
+        if (!isAdmin) { input.value = entry.nodes[0].userData.product.name; return; }
         const val = input.value.trim() || entry.baseName;
         entry.nodes[0].userData.product.name = val;
         for (let i = 1; i < entry.nodes.length; i += 1) entry.nodes[i].userData.product.name = val;
@@ -2509,23 +2530,152 @@ function toggleAdmin(force) {
 }
 
 function resetRenames() {
+  if (!isAdmin) return;
   saveRenames({});
   applyRenames();
   renderAdminList();
   refreshNameSprite();
 }
 
+function resetShowroom() {
+  if (!isAdmin) return;
+  if (!window.confirm('Khôi phục mặc định sẽ xóa tất cả sản phẩm đã thêm và khôi phục trạng thái ban đầu. Tiếp tục?')) return;
+  resetProductState();
+}
+
+function exportProductsJSON() {
+  const snapshot = buildSnapshot();
+  const dataStr = JSON.stringify(snapshot, null, 2);
+  const blob = new Blob([dataStr], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'showroom-products.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('Đã xuất file showroom-products.json');
+}
+
+function importProductsJSON(event) {
+  if (!isAdmin) return;
+  const file = event.target.files[0];
+  if (!file) return;
+  
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const snapshot = JSON.parse(e.target.result);
+      if (!snapshot.version || !Array.isArray(snapshot.builtins)) {
+        toast('File JSON không hợp lệ');
+        return;
+      }
+      // Áp dụng snapshot và reload
+      localStorage.setItem(PRODUCT_STATE_KEY, JSON.stringify(snapshot));
+      window.location.reload();
+    } catch (err) {
+      console.error('Lỗi import JSON:', err);
+      toast('Lỗi import JSON: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = ''; // Reset input để có thể chọn lại cùng file
+}
+
+/* ---------------- Login / Auth (client-side demo) ---------------- */
+
+function initAuth() {
+  try { isAdmin = sessionStorage.getItem(AUTH_KEY) === '1'; } catch (e) { isAdmin = false; }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'login-overlay';
+  overlay.className = 'login-overlay';
+  overlay.innerHTML =
+    '<form id="login-form" class="login-card" autocomplete="off" onsubmit="return false;">' +
+    '<p class="login-eyebrow">SAITEX Showroom</p>' +
+    '<h2 class="login-title">Đăng nhập Admin</h2>' +
+    '<label class="login-field">Tài khoản<input id="login-user" type="text" /></label>' +
+    '<label class="login-field">Mật khẩu<input id="login-pass" type="password" /></label>' +
+    '<p id="login-error" class="login-error"></p>' +
+    '<button type="submit" class="login-submit">Đăng nhập</button>' +
+    '<p class="login-hint">Tài khoản: <b>admin</b> · Mật khẩu: <b>saitex2026</b></p>' +
+    '</form>';
+  document.body.appendChild(overlay);
+
+  const form = document.getElementById('login-form');
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const u = document.getElementById('login-user').value.trim();
+    const p = document.getElementById('login-pass').value;
+    if (u === ADMIN_USER && p === ADMIN_PASS) {
+      isAdmin = true;
+      try { sessionStorage.setItem(AUTH_KEY, '1'); } catch (err) { /* ignore */ }
+      document.getElementById('login-error').textContent = '';
+      document.getElementById('login-pass').value = '';
+      closeLogin();
+      updateAdminUI();
+      if (pendingAdminOpen) { pendingAdminOpen = false; toggleAdmin(true); }
+    } else {
+      document.getElementById('login-error').textContent = 'Sai tài khoản hoặc mật khẩu.';
+    }
+  });
+}
+
+function openLogin() {
+  const o = document.getElementById('login-overlay');
+  if (!o) return;
+  o.classList.add('show');
+  const u = document.getElementById('login-user');
+  if (u) u.focus();
+}
+
+function closeLogin() {
+  const o = document.getElementById('login-overlay');
+  if (o) o.classList.remove('show');
+}
+
+function logout() {
+  isAdmin = false;
+  try { sessionStorage.removeItem(AUTH_KEY); } catch (e) { /* ignore */ }
+  toggleAdmin(false);
+  updateAdminUI();
+}
+
+function updateAdminUI() {
+  const btn = document.getElementById('admin-toggle');
+  if (btn) btn.textContent = isAdmin ? '⚙ Quản lý tên' : '🔐 Đăng nhập Admin';
+  const logoutBtn = document.getElementById('admin-logout');
+  if (logoutBtn) logoutBtn.style.display = isAdmin ? '' : 'none';
+  const resetBtn = document.getElementById('admin-reset');
+  if (resetBtn) resetBtn.style.display = isAdmin ? '' : 'none';
+  const closeBtn = document.getElementById('admin-close');
+  if (closeBtn) closeBtn.style.display = isAdmin ? '' : 'none';
+  const resetShowroomBtn = document.getElementById('admin-reset-showroom');
+  if (resetShowroomBtn) resetShowroomBtn.style.display = isAdmin ? '' : 'none';
+  const exportBtn = document.getElementById('admin-export-json');
+  if (exportBtn) exportBtn.style.display = isAdmin ? '' : 'none';
+  const importLabel = document.querySelector('.admin-import-label');
+  if (importLabel) importLabel.style.display = isAdmin ? '' : 'none';
+}
+
 function initProductAdmin() {
+  initAuth();
   rebuildRegistry();
   applyRenames();
 
   const btn = document.createElement('button');
   btn.id = 'admin-toggle';
   btn.className = 'admin-toggle';
-  btn.textContent = '⚙ Quản lý tên';
+  btn.textContent = isAdmin ? '⚙ Quản lý tên' : '🔐 Đăng nhập Admin';
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
-    toggleAdmin();
+    if (isAdmin) {
+      toggleAdmin();
+    } else {
+      pendingAdminOpen = true;
+      openLogin();
+    }
   });
   document.body.appendChild(btn);
 
@@ -2536,10 +2686,29 @@ function initProductAdmin() {
     '<div class="admin-head">' +
     '<span>Quản lý tên sản phẩm</span>' +
     '<button id="admin-reset" class="admin-mini">Đặt lại</button>' +
+    '<button id="admin-logout" class="admin-mini">Đăng xuất</button>' +
     '<button id="admin-close" class="admin-mini">✕</button>' +
+    '</div>' +
+    '<div class="admin-actions">' +
+    '<button id="admin-reset-showroom" class="admin-mini">Khôi phục mặc định</button>' +
+    '<button id="admin-export-json" class="admin-mini">Xuất JSON</button>' +
+    '<label class="admin-mini admin-import-label">Nhập JSON<input id="admin-import-json" type="file" accept=".json" style="display:none"></label>' +
     '</div>' +
     '<div id="admin-list" class="admin-list"></div>';
   document.body.appendChild(panel);
+
+  document.getElementById('admin-reset-showroom').addEventListener('click', (e) => {
+    e.stopPropagation();
+    resetShowroom();
+  });
+  document.getElementById('admin-export-json').addEventListener('click', (e) => {
+    e.stopPropagation();
+    exportProductsJSON();
+  });
+  document.getElementById('admin-import-json').addEventListener('change', (e) => {
+    e.stopPropagation();
+    importProductsJSON(e);
+  });
 
   document.getElementById('admin-close').addEventListener('click', (e) => {
     e.stopPropagation();
@@ -2549,7 +2718,470 @@ function initProductAdmin() {
     e.stopPropagation();
     resetRenames();
   });
+  document.getElementById('admin-logout').addEventListener('click', (e) => {
+    e.stopPropagation();
+    logout();
+  });
+
+  updateAdminUI();
   renderAdminList();
+}
+
+/* ---------------- Product Manager: thêm / sửa sản phẩm ---------------- */
+
+function zoneCenter(id) {
+  const z = ZONES.find((x) => x.id === id);
+  return z ? { x: (z.x0 + z.x1) / 2, z: (z.z0 + z.z1) / 2, zone: z } : null;
+}
+
+function assignProductUids() {
+  productUidCounter = 0;
+  for (const root of products) {
+    root.traverse((node) => {
+      const p = node.userData && node.userData.product;
+      if (!p) return;
+      // Chỉ gán uid cho product object, không phải node (để xử lý shared product)
+      if (p.uid) return;
+      // Nếu product đang được share (ví dụ addHat), gán uid cho object cha
+      // và cả node con sẽ kế thừa
+      p.uid = 'b' + productUidCounter++;
+    });
+  }
+}
+
+function spotFree(x, z, r) {
+  const sr = r || SPAWN_R;
+  if (x < -19.4 || x > 19.4 || z < -11.9 || z > 11.9) return false;
+  for (const o of obstacles) {
+    if (x > o.minX - sr && x < o.maxX + sr && z > o.minZ - sr && z < o.maxZ + sr) return false;
+  }
+  for (const s of occupiedSpots) {
+    const dx = x - s.x;
+    const dz = z - s.z;
+    if (dx * dx + dz * dz < (sr + s.r) * (sr + s.r)) return false;
+  }
+  return true;
+}
+
+function findFreeSpot(zoneId) {
+  const c = zoneCenter(zoneId);
+  if (!c) return null;
+  const z = c.zone;
+  // Quét lưới trong khu, ưu tiên các vị trí trống
+  for (let ring = 0; ring < 12; ring += 1) {
+    const rad = 0.6 + ring * 0.7;
+    const steps = 10 + ring * 4;
+    for (let i = 0; i < steps; i += 1) {
+      const a = (i / steps) * Math.PI * 2;
+      const x = c.x + Math.cos(a) * rad;
+      const zz = c.z + Math.sin(a) * rad * 0.7;
+      if (x < z.x0 + 0.8 || x > z.x1 - 0.8 || zz < z.z0 + 0.8 || zz > z.z1 - 0.8) continue;
+      if (spotFree(x, zz, SPAWN_R)) {
+        const y = 0.02;
+        const rotY = Math.atan2(c.x - x, c.z - zz);
+        return { x, y, z: zz, rotY };
+      }
+    }
+  }
+  // fallback: giữa khu
+  if (spotFree(c.x, c.z, SPAWN_R)) return { x: c.x, y: 0.02, z: c.z, rotY: 0 };
+  return null;
+}
+
+function placeProduct(model, meta, spot, zoneId) {
+  model.position.set(spot.x, spot.y != null ? spot.y : 0.02, spot.z);
+  model.rotation.y = spot.rotY || 0;
+  model.userData.product = {
+    name: meta.name,
+    category: meta.category,
+    categoryId: meta.categoryId || zoneId,
+    price: meta.price,
+    material: meta.material || '',
+    desc: meta.desc || '',
+    color: meta.color,
+    style: meta.style,
+    glbUrl: meta.glbUrl || '',
+    status: meta.status || 'normal',
+    customId: meta.customId || '',
+    baseName: meta.name,
+  };
+  model.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = false; } });
+  scene.add(model);
+  products.push(model);
+  customNodes.push(model);
+  if (model.userData.product.status === 'out') {
+    hiddenNodes.add(model);
+    model.visible = false;
+  }
+  occupiedSpots.push({ x: spot.x, z: spot.z, r: SPAWN_R, node: model });
+  saveProductState();
+  return model;
+}
+
+function tintProduct(node, color) {
+  node.traverse((c) => {
+    if (!c.isMesh || !c.material) return;
+    const mats = Array.isArray(c.material) ? c.material : [c.material];
+    for (const m of mats) {
+      if (!m || !m.color || m.userData._noTint) continue;
+      // chỉ đổi màu vật liệu vải/da/đá (tintable) hoặc vật liệu không kim loại
+      const isTint = m.userData.tintable || (m.metalness == null ? true : m.metalness < 0.5);
+      if (!isTint) continue;
+      m.color.set(color);
+      m.needsUpdate = true;
+    }
+  });
+}
+
+function updateProduct(node, meta, opts) {
+  const o = opts || {};
+  node.userData.product = Object.assign({}, node.userData.product, {
+    name: meta.name,
+    category: meta.category,
+    categoryId: meta.categoryId || (node.userData.product && node.userData.product.categoryId),
+    price: meta.price,
+    material: meta.material,
+    desc: meta.desc,
+    color: meta.color,
+    style: meta.style,
+    status: meta.status || (node.userData.product && node.userData.product.status) || 'normal',
+    customId: meta.customId || (node.userData.product && node.userData.product.customId) || '',
+  });
+  if (o.recolor && o.oldColor) tintProduct(node, meta.color);
+  // cập nhật tên hiển thị (registry dùng baseName để gom nhóm)
+  rebuildRegistry();
+  if (productCardVisible) refreshProductCard(node);
+  saveProductState();
+}
+
+function setSpotOnNode(node, spot) {
+  node.position.set(spot.x, spot.y != null ? spot.y : 0.02, spot.z);
+  node.rotation.y = spot.rotY || 0;
+  // cập nhật occupiedSpots tương ứng
+  const idx = occupiedSpots.findIndex((s) => s.node === node);
+  if (idx !== -1) {
+    occupiedSpots[idx].x = spot.x;
+    occupiedSpots[idx].z = spot.z;
+  } else {
+    occupiedSpots.push({ x: spot.x, z: spot.z, r: SPAWN_R, node });
+  }
+}
+
+function moveProduct(node, spot, zoneId) {
+  if (!node || !node.userData.product) return false;
+  setSpotOnNode(node, spot);
+  node.userData.product.categoryId = zoneId || node.userData.product.categoryId;
+  const z = ZONES.find((x) => x.id === node.userData.product.categoryId);
+  if (z) node.userData.product.category = z.vi;
+  // nếu đang ẩn, bỏ ẩn khi chuyển khu
+  if (hiddenNodes.has(node)) {
+    hiddenNodes.delete(node);
+    node.visible = true;
+    if (node.userData.product) node.userData.product.status = 'normal';
+  }
+  if (productCardVisible && focusGroup === node) refreshProductCard(node);
+  saveProductState();
+  return true;
+}
+
+function removeProduct(node) {
+  if (!node) return;
+  if (focusGroup === node) clearFocus();
+  if (restoringGroup === node) restoringGroup = null;
+  hiddenNodes.delete(node);
+  // gỡ khỏi cha (custom: scene; built-in: rack/group)
+  if (node.removeFromParent) node.removeFromParent();
+  else if (node.parent) node.parent.remove(node);
+  const pi = products.indexOf(node);
+  if (pi !== -1) products.splice(pi, 1);
+  const ci = customNodes.indexOf(node);
+  if (ci !== -1) customNodes.splice(ci, 1);
+  const oi = occupiedSpots.findIndex((s) => s.node === node);
+  if (oi !== -1) occupiedSpots.splice(oi, 1);
+  // giải phóng tài nguyên GPU
+  node.traverse((c) => {
+    if (!c.isMesh) return;
+    if (c.geometry) c.geometry.dispose();
+    if (c.material) {
+      const mats = Array.isArray(c.material) ? c.material : [c.material];
+      for (const m of mats) if (m && m.dispose) m.dispose();
+    }
+  });
+  // Ghi nhận uid đã xóa
+  const p = node.userData && node.userData.product;
+  if (p && p.uid && p.uid.startsWith('b')) {
+    // Thêm uid vào danh sách deleted nếu chưa có
+    const stored = localStorage.getItem(PRODUCT_STATE_KEY);
+    let snapshot = {};
+    if (stored) try { snapshot = JSON.parse(stored); } catch {} 
+    if (!snapshot.deleted) snapshot.deleted = [];
+    if (!snapshot.deleted.includes(p.uid)) snapshot.deleted.push(p.uid);
+    localStorage.setItem(PRODUCT_STATE_KEY, JSON.stringify(snapshot));
+  }
+  rebuildRegistry();
+}
+
+function setProductHidden(node, hidden) {
+  if (!node || !node.userData.product) return;
+  if (hidden) {
+    hiddenNodes.add(node);
+    node.visible = false;
+    node.userData.product.status = 'out';
+    if (focusGroup === node) clearFocus();
+  } else {
+    hiddenNodes.delete(node);
+    node.visible = true;
+    node.userData.product.status = 'normal';
+  }
+  saveProductState();
+}
+
+function buildSnapshot() {
+  const snapshot = {
+    version: 1,
+    savedAt: Date.now(),
+    builtins: [],
+    custom: [],
+    deleted: []
+  };
+
+  // Thu thập trạng thái sản phẩm có sẵn (built-in)
+  for (const root of products) {
+    root.traverse((node) => {
+      const p = node.userData && node.userData.product;
+      if (!p) return;
+      
+      // Sản phẩm có customId là do admin thêm (qua productManagerUI)
+      if (p.customId) {
+        snapshot.custom.push({
+          customId: p.customId,
+          zoneId: p.categoryId,
+          meta: {
+            name: p.name,
+            category: p.category,
+            categoryId: p.categoryId,
+            price: p.price,
+            material: p.material || '',
+            desc: p.desc || '',
+            color: p.color,
+            style: p.style,
+            glbUrl: p.glbUrl || '',
+            status: p.status || 'normal'
+          }
+        });
+        return;
+      }
+      
+      // Sản phẩm có uid (do assignProductUids gán)
+      if (p.uid && p.uid.startsWith('b')) {
+        const pos = node.position;
+        const rot = node.rotation;
+        snapshot.builtins.push({
+          uid: p.uid,
+          name: p.name,
+          price: p.price,
+          material: p.material || '',
+          desc: p.desc || '',
+          color: p.color,
+          status: p.status || 'normal',
+          position: { x: pos.x, y: pos.y, z: pos.z },
+          rotation: { x: rot.x, y: rot.y, z: rot.z },
+          visible: node.visible !== false
+        });
+        return;
+      }
+      
+      // Sản phẩm không có uid - gán uid và thêm vào builtins
+      p.uid = 'b' + productUidCounter++;
+      const pos = node.position;
+      const rot = node.rotation;
+      snapshot.builtins.push({
+        uid: p.uid,
+        name: p.name,
+        price: p.price,
+        material: p.material || '',
+        desc: p.desc || '',
+        color: p.color,
+        status: p.status || 'normal',
+        position: { x: pos.x, y: pos.y, z: pos.z },
+        rotation: { x: rot.x, y: rot.y, z: rot.z },
+        visible: node.visible !== false
+      });
+    });
+  }
+
+  // Thu thập danh sách uid đã bị xóa (chỉ sản phẩm built-in)
+  // Chúng ta sẽ tìm uid mà không còn trong products
+  const allUids = new Set();
+  for (const root of products) {
+    root.traverse((node) => {
+      const p = node.userData && node.userData.product;
+      if (p && p.uid && p.uid.startsWith('b')) {
+        allUids.add(p.uid);
+      }
+    });
+  }
+  // Các uid trước đó đã được xóa có thể vẫn còn trong snapshot deleted
+  // Chúng ta sẽ giữ danh sách deleted từ snapshot trước nếu có
+
+  return snapshot;
+}
+
+function applyProductState() {
+  // Đọc snapshot từ localStorage
+  const stored = localStorage.getItem(PRODUCT_STATE_KEY);
+  if (!stored) return;
+  
+  try {
+    const snapshot = JSON.parse(stored);
+    if (snapshot.version !== 1) return;
+    
+    // 1. Xóa các sản phẩm đã marked deleted
+    for (const uid of snapshot.deleted) {
+      // Tìm node trong products mảng
+      for (let i = products.length - 1; i >= 0; i--) {
+        const node = products[i];
+        const p = node.userData && node.userData.product;
+        if (p && p.uid === uid) {
+          removeProduct(node);
+          break;
+        }
+      }
+    }
+    
+    // 2. Khôi phục built-in products
+    for (const bi of snapshot.builtins) {
+      // Tìm node trong products mảng
+      let targetNode = null;
+      for (const node of products) {
+        const p = node.userData && node.userData.product;
+        if (p && p.uid === bi.uid) {
+          targetNode = node;
+          break;
+        }
+      }
+      
+      if (targetNode && targetNode.userData.product) {
+        // Áp đặt lại trạng thái
+        const p = targetNode.userData.product;
+        p.name = bi.name;
+        p.price = bi.price;
+        p.material = bi.material;
+        p.desc = bi.desc;
+        p.color = bi.color;
+        p.style = bi.style || p.style || '';
+        p.status = bi.status || 'normal';
+        
+        // Đặt lại vị trí và xoay
+        targetNode.position.set(bi.position.x, bi.position.y, bi.position.z);
+        targetNode.rotation.set(bi.rotation.x, bi.rotation.y, bi.rotation.z);
+        targetNode.visible = bi.visible !== false;
+        
+        // Cập nhật giao diện
+        if (productCardVisible && focusGroup === targetNode) {
+          refreshProductCard(targetNode);
+        }
+      }
+    }
+    
+    // 3. Khôi phục custom products (sử dụng hàm của productManagerUI)
+    if (productManager && productManager.restoreCustom) {
+      productManager.restoreCustom();
+    }
+    
+    // 4. Xây lại registry và render danh sách admin
+    rebuildRegistry();
+    renderAdminList();
+    
+  } catch (e) {
+    console.error('Lỗi áp dụng trạng thái sản phẩm:', e);
+  }
+}
+
+function saveProductState() {
+  const snapshot = buildSnapshot();
+  localStorage.setItem(PRODUCT_STATE_KEY, JSON.stringify(snapshot));
+}
+
+function resetProductState() {
+  // Xóa dữ liệu sản phẩm đã lưu
+  localStorage.removeItem(PRODUCT_STATE_KEY);
+  // Giữ lại custom products cũ (nếu cần) - có thể xóa sạch tất cả
+  localStorage.removeItem(LEGACY_CUSTOM_KEY);
+  // Reload trang để khôi phục ban đầu
+  window.location.reload();
+}
+
+function refreshProductCard(node) {
+  if (!node || !node.userData.product) return;
+  const p = node.userData.product;
+  const card = document.getElementById('product-card');
+  if (!card) return;
+  card.innerHTML =
+    '<p class="eyebrow">' + p.category + '</p>' +
+    '<p class="product-name">' + p.name + '</p>' +
+    (p.material ? '<p class="product-color">Chất liệu: ' + p.material + '</p>' : '') +
+    (p.desc ? '<p class="product-color">' + p.desc + '</p>' : '') +
+    '<p class="product-color"><span class="chip" style="background:' + p.color + '"></span>' + p.color + '</p>' +
+    '<p class="product-price">' + p.price + '</p>' +
+    statusBadgeHtml(p.status);
+  card.classList.add('visible');
+}
+
+function statusBadgeHtml(status) {
+  const s = status || 'normal';
+  const map = {
+    normal: ['Bình thường', 'normal'],
+    new: ['Mới về', 'new'],
+    hot: ['Bán chạy', 'hot'],
+    out: ['Tạm hết hàng', 'out'],
+  };
+  const item = map[s] || map.normal;
+  return '<span class="pm-status-badge ' + item[1] + '">' + item[0] + '</span>';
+}
+
+function toast(msg) {
+  let t = document.getElementById('pm-toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'pm-toast';
+    t.className = 'pm-toast';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+function initProductManager() {
+  // Gán uid cho các sản phẩm có sẵn trước khi khôi phục trạng thái
+  assignProductUids();
+
+  productManager = createProductManager({
+    isAdmin: () => isAdmin,
+    findFreeSpot,
+    placeProduct,
+    updateProduct,
+    moveProduct,
+    removeProduct,
+    setProductHidden,
+    refreshRegistry: () => { rebuildRegistry(); renderAdminList(); },
+    refreshNameSprite,
+    refreshProductCard,
+    productCardNode: () => focusGroup,
+    onMessage: toast,
+    // Hàm lưu trữ trạng thái sản phẩm
+    persistProductState: saveProductState,
+    // Hàm khôi phục trạng thái sản phẩm
+    restoreProductState: applyProductState,
+  });
+  
+  // Khôi phục trạng thái từ localStorage (sau khi đã assign uid)
+  if (productManager.restoreCustom) productManager.restoreCustom();
+  
+  // Áp dụng lại trạng thái sản phẩm đã lưu (nếu có)
+  applyProductState();
 }
 
 function animate() {
@@ -2577,6 +3209,7 @@ function animate() {
   controls.update();
   if (camera.position.y < 0.4) camera.position.y = 0.4;
   updateHud();
+  if (productManager && productManager.tick) productManager.tick();
   // FPS counter
   fpsTime++;
   if (fpsTime > 30) {
