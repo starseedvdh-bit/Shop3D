@@ -86,6 +86,8 @@ let focusGroup = null;
 let restoringGroup = null;
 let nameSprite = null;
 const ZOOM_FACTOR = 1.28;
+const RENAME_KEY = 'saitex_product_renames';
+const productRegistry = [];
 const products = [];
 const staff = [];
 const STOCK = 4; // 4x product density per display area
@@ -142,6 +144,7 @@ async function init() {
 
   buildZones();
   buildWordmarks();
+  initProductAdmin();
   addHostDesk();
   addLounge();
   addStaffTeam();
@@ -2393,6 +2396,160 @@ function clearFocus() {
   if (focusGroup) restoringGroup = focusGroup;
   focusGroup = null;
   removeNameSprite();
+}
+
+/* ---------------- Admin: quản lý tên sản phẩm ---------------- */
+
+function loadRenames() {
+  try {
+    return JSON.parse(localStorage.getItem(RENAME_KEY)) || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveRenames(map) {
+  try {
+    localStorage.setItem(RENAME_KEY, JSON.stringify(map));
+  } catch (e) {
+    /* ignore quota errors */
+  }
+}
+
+function rebuildRegistry() {
+  productRegistry.length = 0;
+  const map = new Map();
+  for (const root of products) {
+    root.traverse((node) => {
+      const p = node.userData && node.userData.product;
+      if (!p) return;
+      if (!p.baseName) p.baseName = p.name;
+      const key = p.category + '||' + p.baseName;
+      let entry = map.get(key);
+      if (!entry) {
+        entry = { category: p.category, baseName: p.baseName, nodes: [], key };
+        map.set(key, entry);
+        productRegistry.push(entry);
+      }
+      entry.nodes.push(node);
+    });
+  }
+}
+
+function applyRenames() {
+  const saved = loadRenames();
+  for (const entry of productRegistry) {
+    const display = saved[entry.key] || entry.baseName;
+    for (const node of entry.nodes) node.userData.product.name = display;
+  }
+}
+
+function refreshNameSprite() {
+  if (!focusGroup || !focusGroup.userData.product) return;
+  removeNameSprite();
+  nameSprite = makeLabelSprite(focusGroup.userData.product.name);
+  scene.add(nameSprite);
+}
+
+function renderAdminList() {
+  const list = document.getElementById('admin-list');
+  if (!list) return;
+  list.innerHTML = '';
+  const byCat = new Map();
+  for (const entry of productRegistry) {
+    if (!byCat.has(entry.category)) byCat.set(entry.category, []);
+    byCat.get(entry.category).push(entry);
+  }
+  for (const [cat, entries] of byCat) {
+    const header = document.createElement('div');
+    header.className = 'admin-cat';
+    header.textContent = cat + ' · ' + entries.length + ' loại';
+    list.appendChild(header);
+    for (const entry of entries) {
+      const row = document.createElement('div');
+      row.className = 'admin-row';
+      const count = document.createElement('span');
+      count.className = 'admin-count';
+      count.textContent = entry.nodes.length + '×';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = entry.nodes[0].userData.product.name;
+      input.dataset.key = entry.key;
+      input.addEventListener('change', () => {
+        const val = input.value.trim() || entry.baseName;
+        entry.nodes[0].userData.product.name = val;
+        for (let i = 1; i < entry.nodes.length; i += 1) entry.nodes[i].userData.product.name = val;
+        const map = loadRenames();
+        if (val === entry.baseName) delete map[entry.key];
+        else map[entry.key] = val;
+        saveRenames(map);
+        if (focusGroup && entry.nodes.indexOf(focusGroup) !== -1) {
+          refreshNameSprite();
+          if (productCardVisible) {
+            const nameEl = document.querySelector('#product-card .product-name');
+            if (nameEl) nameEl.textContent = val;
+          }
+        }
+      });
+      row.appendChild(count);
+      row.appendChild(input);
+      list.appendChild(row);
+    }
+  }
+}
+
+function toggleAdmin(force) {
+  const panel = document.getElementById('admin-panel');
+  const btn = document.getElementById('admin-toggle');
+  if (!panel) return;
+  const open = typeof force === 'boolean' ? force : !panel.classList.contains('open');
+  panel.classList.toggle('open', open);
+  if (btn) btn.classList.toggle('active', open);
+  if (open) renderAdminList();
+}
+
+function resetRenames() {
+  saveRenames({});
+  applyRenames();
+  renderAdminList();
+  refreshNameSprite();
+}
+
+function initProductAdmin() {
+  rebuildRegistry();
+  applyRenames();
+
+  const btn = document.createElement('button');
+  btn.id = 'admin-toggle';
+  btn.className = 'admin-toggle';
+  btn.textContent = '⚙ Quản lý tên';
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleAdmin();
+  });
+  document.body.appendChild(btn);
+
+  const panel = document.createElement('div');
+  panel.id = 'admin-panel';
+  panel.className = 'admin-panel';
+  panel.innerHTML =
+    '<div class="admin-head">' +
+    '<span>Quản lý tên sản phẩm</span>' +
+    '<button id="admin-reset" class="admin-mini">Đặt lại</button>' +
+    '<button id="admin-close" class="admin-mini">✕</button>' +
+    '</div>' +
+    '<div id="admin-list" class="admin-list"></div>';
+  document.body.appendChild(panel);
+
+  document.getElementById('admin-close').addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleAdmin(false);
+  });
+  document.getElementById('admin-reset').addEventListener('click', (e) => {
+    e.stopPropagation();
+    resetRenames();
+  });
+  renderAdminList();
 }
 
 function animate() {
