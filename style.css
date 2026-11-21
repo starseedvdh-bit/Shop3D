@@ -50,6 +50,51 @@ canvas {
   bottom: 18px;
 }
 
+.product-card {
+  right: 18px;
+  top: 18px;
+  min-width: 220px;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity 0.28s ease, transform 0.28s ease;
+}
+
+.product-card.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.product-name {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  margin: 4px 0 8px;
+}
+
+.product-color {
+  font-size: 13px;
+  color: #5c564f;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.product-color .chip {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+}
+
+.product-price {
+  font-size: 17px;
+  font-weight: 600;
+  margin-top: 10px;
+  color: #8a5a2b;
+}
+
 .legend {
   right: 18px;
   bottom: 18px;
