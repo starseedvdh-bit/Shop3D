@@ -10,7 +10,7 @@ body {
   height: 100%;
   overflow: hidden;
   overscroll-behavior: none;
-  background: #c9d6df;
+  background: #c9cdd2;
   color: #1c1916;
   font-family: "Be Vietnam Pro", "Helvetica Neue", Arial, sans-serif;
 }
@@ -208,12 +208,12 @@ h1 {
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
 }
 
-.swatch.apparel { background: #d9c7b0; }
-.swatch.jewelry { background: #2a2724; }
-.swatch.watches { background: #243038; }
-.swatch.footwear { background: #cbbba8; }
-.swatch.handbags { background: #6d3438; }
-.swatch.accessories { background: #3f4d45; }
+.swatch.apparel { background: #c9b79e; }
+.swatch.jewelry { background: #1d1a17; }
+.swatch.watches { background: #1e2a36; }
+.swatch.footwear { background: #c2b6a2; }
+.swatch.handbags { background: #5a2a2e; }
+.swatch.accessories { background: #2b4038; }
 
 @media (max-width: 720px) {
   h1 { font-size: 34px; }

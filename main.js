@@ -14,7 +14,7 @@ const ZONES = [
     vi: 'Khu Quần áo',
     en: 'Apparel',
     x0: -18.7, x1: -7.7, z0: -11.5, z1: -2.3,
-    rug: '#d9c7b0',
+    rug: '#c9b79e',
     light: '#fff1dc',
   },
   {
@@ -22,7 +22,7 @@ const ZONES = [
     vi: 'Khu Trang sức',
     en: 'Jewelry',
     x0: -4.7, x1: 4.7, z0: -11.5, z1: -2.3,
-    rug: '#2a2724',
+    rug: '#1d1a17',
     light: '#fff6e4',
   },
   {
@@ -30,7 +30,7 @@ const ZONES = [
     vi: 'Khu Đồng hồ',
     en: 'Watches',
     x0: 7.7, x1: 18.7, z0: -11.5, z1: -2.3,
-    rug: '#243038',
+    rug: '#1e2a36',
     light: '#e7eef8',
   },
   {
@@ -38,7 +38,7 @@ const ZONES = [
     vi: 'Khu Giày dép',
     en: 'Footwear',
     x0: -18.7, x1: -7.7, z0: 1.1, z1: 10,
-    rug: '#cbbba8',
+    rug: '#c2b6a2',
     light: '#fff3e6',
   },
   {
@@ -46,7 +46,7 @@ const ZONES = [
     vi: 'Khu Túi xách',
     en: 'Handbags',
     x0: -4.7, x1: 4.7, z0: 1.1, z1: 10,
-    rug: '#6d3438',
+    rug: '#5a2a2e',
     light: '#fff0ea',
   },
   {
@@ -55,7 +55,7 @@ const ZONES = [
     en: 'Accessories',
     note: 'Mũ · Kính mát · Thắt lưng · Khăn',
     x0: 7.7, x1: 18.7, z0: 1.1, z1: 10,
-    rug: '#3f4d45',
+    rug: '#2b4038',
     light: '#f4f7f2',
   },
 ];
@@ -82,6 +82,10 @@ let raycaster;
 let mouse = new THREE.Vector2();
 let hoverProduct = null;
 let productCardVisible = false;
+let focusGroup = null;
+let restoringGroup = null;
+let nameSprite = null;
+const ZOOM_FACTOR = 1.28;
 const products = [];
 const staff = [];
 const STOCK = 4; // 4x product density per display area
@@ -106,7 +110,7 @@ async function init() {
   maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
 
   scene = new THREE.Scene();
-  scene.background = new THREE.Color('#c9d6df');
+  scene.background = new THREE.Color('#c9cdd2');
   scene.environmentIntensity = 0.45;
 
   camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.08, 160);
@@ -183,11 +187,13 @@ async function init() {
           '<p class="product-price">' + p.price + '</p>';
         card.classList.add('visible');
         productCardVisible = true;
+        focusProduct(node);
         return;
       }
     }
     card.classList.remove('visible');
     productCardVisible = false;
+    clearFocus();
   });
 
   clock = new THREE.Clock();
@@ -196,13 +202,13 @@ async function init() {
 
 function createMaterials() {
   materials.wall = new THREE.MeshStandardMaterial({
-    color: '#f4f0e8',
+    color: '#efe8dd',
     roughness: 0.92,
     metalness: 0.02,
     envMapIntensity: 0.2,
   });
   materials.ceiling = new THREE.MeshStandardMaterial({
-    color: '#f7f5f1',
+    color: '#f4efe7',
     roughness: 0.9,
     metalness: 0,
   });
@@ -214,39 +220,39 @@ function createMaterials() {
     envMapIntensity: 0.35,
   });
   materials.partition = new THREE.MeshStandardMaterial({
-    color: '#f7f4ef',
+    color: '#f2ece2',
     roughness: 0.88,
     metalness: 0.02,
   });
   materials.brass = new THREE.MeshStandardMaterial({
-    color: '#c6a15b',
-    roughness: 0.28,
+    color: '#c9a45c',
+    roughness: 0.26,
     metalness: 1,
-    envMapIntensity: 1,
+    envMapIntensity: 1.1,
   });
   materials.chrome = new THREE.MeshStandardMaterial({
-    color: '#d5d8dc',
+    color: '#d7dade',
     roughness: 0.16,
     metalness: 1,
     envMapIntensity: 1,
   });
   materials.plaster = new THREE.MeshStandardMaterial({
-    color: '#f3efe8',
+    color: '#efe9df',
     roughness: 0.72,
     metalness: 0.02,
   });
   materials.dark = new THREE.MeshStandardMaterial({
-    color: '#2c2825',
+    color: '#211c19',
     roughness: 0.55,
     metalness: 0.08,
   });
   materials.wood = new THREE.MeshStandardMaterial({
-    color: '#4a3b32',
+    color: '#3a2a20',
     roughness: 0.62,
     metalness: 0.06,
   });
   materials.velvet = new THREE.MeshStandardMaterial({
-    color: '#161616',
+    color: '#14110f',
     roughness: 0.95,
     metalness: 0,
   });
@@ -372,7 +378,7 @@ function makeStoneTexture() {
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#e4dfd8';
+  ctx.fillStyle = '#e5dfd4';
   ctx.fillRect(0, 0, size, size);
 
   for (let i = 0; i < 90; i += 1) {
@@ -591,7 +597,7 @@ function buildShell() {
 function buildExterior() {
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(90, 36),
-    new THREE.MeshStandardMaterial({ color: '#d5d0c8', roughness: 0.96 }),
+    new THREE.MeshStandardMaterial({ color: '#c9c2b7', roughness: 0.96 }),
   );
   ground.rotation.x = -Math.PI / 2;
   ground.position.set(0, -0.03, FLOOR_D / 2 + 16);
@@ -2334,10 +2340,83 @@ function onResize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
+function makeLabelSprite(text) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  roundRect(ctx, 10, 10, canvas.width - 20, canvas.height - 20, 26);
+  ctx.fillStyle = 'rgba(24, 20, 16, 0.92)';
+  ctx.fill();
+  ctx.strokeStyle = '#c9a45c';
+  ctx.lineWidth = 5;
+  ctx.stroke();
+  ctx.fillStyle = '#f5efe4';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  fitText(ctx, text, '600 54px "Be Vietnam Pro", sans-serif', canvas.width - 70);
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2 + 2);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, toneMapped: false });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(1.7, 0.42, 1);
+  sprite.renderOrder = 999;
+  return sprite;
+}
+
+function removeNameSprite() {
+  if (!nameSprite) return;
+  scene.remove(nameSprite);
+  if (nameSprite.material.map) nameSprite.material.map.dispose();
+  nameSprite.material.dispose();
+  nameSprite = null;
+}
+
+function focusProduct(node) {
+  if (focusGroup === node) return;
+  if (restoringGroup && restoringGroup.userData._rest) restoringGroup.scale.copy(restoringGroup.userData._rest);
+  if (focusGroup) restoringGroup = focusGroup;
+  if (!node.userData._rest) node.userData._rest = node.scale.clone();
+  node.userData._zoom = node.userData._rest.clone().multiplyScalar(ZOOM_FACTOR);
+  focusGroup = node;
+  removeNameSprite();
+  if (node.userData.product) {
+    nameSprite = makeLabelSprite(node.userData.product.name);
+    scene.add(nameSprite);
+  }
+}
+
+function clearFocus() {
+  if (restoringGroup && restoringGroup.userData._rest) restoringGroup.scale.copy(restoringGroup.userData._rest);
+  if (focusGroup) restoringGroup = focusGroup;
+  focusGroup = null;
+  removeNameSprite();
+}
+
 function animate() {
   const dt = Math.min(clock.getDelta(), 0.05);
   updateWalk(dt);
   updateStaff(dt, clock.elapsedTime);
+
+  // Smooth zoom / restore of the focused product
+  if (focusGroup && focusGroup.userData._zoom) {
+    focusGroup.scale.lerp(focusGroup.userData._zoom, 0.16);
+    if (nameSprite) {
+      const box = new THREE.Box3().setFromObject(focusGroup);
+      const center = box.getCenter(new THREE.Vector3());
+      nameSprite.position.set(center.x, box.max.y + 0.2, center.z);
+    }
+  }
+  if (restoringGroup && restoringGroup.userData._rest) {
+    restoringGroup.scale.lerp(restoringGroup.userData._rest, 0.16);
+    if (restoringGroup.scale.distanceTo(restoringGroup.userData._rest) < 0.006) {
+      restoringGroup.scale.copy(restoringGroup.userData._rest);
+      restoringGroup = null;
+    }
+  }
+
   controls.update();
   if (camera.position.y < 0.4) camera.position.y = 0.4;
   updateHud();
